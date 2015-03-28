@@ -14,7 +14,7 @@ import dateutil.parser
 
 import expire, config
 from config import Job
-
+import copy
 
 class ArgumentError(Exception):
     pass
@@ -31,7 +31,7 @@ class TarsnapBackend(object):
     to mimimize the calls to "tarsnap --list-archives" by caching the result.
     """
 
-    def __init__(self, log, options, dryrun=False):
+    def __init__(self, log, options, tarsnap_bin='tarsnap', dryrun=False):
         """
         ``options`` - options to pass to each tarsnap call
         (a list of key value pairs).
@@ -43,21 +43,27 @@ class TarsnapBackend(object):
         """
         self.log = log
         self.options = options
+        self.tarsnap_bin = tarsnap_bin
         self.dryrun = dryrun
         self._queried_archives = None
         self._known_archives = []
 
-    def call(self, *arguments):
+    def call(self, *arguments, **kwargs):
         """
         ``arguments`` is a single list of strings.
         """
-        call_with = ['tarsnap']
-        for option in self.options:
-            key = option[0]
+        call_with = [self.tarsnap_bin]
+
+        # merge command-line options to tarsnap options in config file
+        options = copy.deepcopy(self.options['common'])
+        for key, val in kwargs.iteritems():
+            options[key] = val
+
+        for key, val in options.iteritems():
             pre = "-" if len(key) == 1 else "--"
             call_with.append("%s%s" % (pre, key))
-            for value in option[1:]:
-                call_with.append(value)
+            if not val is True:
+                call_with.append(str(val))
         call_with.extend(arguments)
         return self._exec_tarsnap(call_with)
 
@@ -182,7 +188,7 @@ class TarsnapBackend(object):
             [args.extend(['--exclude', e]) for e in job.excludes]
             args.extend(['-f', target])
             args.extend(job.sources)
-            self.call(*args)
+            self.call(*args, **self.options['create'])
         # Add the new backup the list of archives, so we have an up-to-date
         # list without needing to query again.
         self._add_known_archive(target)
@@ -216,12 +222,25 @@ class Command(object):
 
     BackendClass = TarsnapBackend
 
-    def __init__(self, args, log, backend_class=None):
+    def __init__(self, args, global_config, log, backend_class=None):
         self.args = args
+        self.global_config = global_config
         self.log = log
+
+        # merge tarsnap options from command-line into those in config file
+        options = {'common': copy.deepcopy(global_config.get('options', {})),
+                   'create': copy.deepcopy(global_config.get('options-create', {})),
+                  }
+        for opt in args.tarsnap_options:
+            key = opt[0]
+            val = opt[1] if len(opt)>1 else True
+            options['common'][key] = val
+
         self.backend = (backend_class or self.BackendClass)(
-            self.log, self.args.tarsnap_options,
-            dryrun=getattr(self.args, 'dryrun', False))
+            self.log, options,
+            dryrun=getattr(self.args, 'dryrun', False),
+            tarsnap_bin=global_config.get('tarsnap-bin', 'tarsnap')
+            )
 
     @classmethod
     def setup_arg_parser(self, parser):
@@ -492,7 +511,7 @@ def main(argv):
     else:
         jobs_to_run = jobs
 
-    command = args.command(args, log)
+    command = args.command(args, global_config, log)
     try:
         for job in jobs_to_run.values():
             command.run(job)
