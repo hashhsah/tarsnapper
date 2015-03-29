@@ -16,6 +16,23 @@ import expire, config
 from config import Job
 import copy
 
+
+def pretty_time_delta(seconds):
+    seconds = int(seconds)
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    if days > 3:
+        return '%dd' % days
+    elif days > 0:
+        return '%dd%dh' % (days, hours)
+    elif hours > 0:
+        return '%dh%dm' % (hours, minutes)
+    elif minutes > 0:
+        return '%dm%ds' % (minutes, seconds)
+    else:
+        return '%ds' % (seconds,)
+
 class ArgumentError(Exception):
     pass
 
@@ -23,6 +40,27 @@ class ArgumentError(Exception):
 class TarsnapError(Exception):
     pass
 
+
+class Archive(object):
+    def __init__(self, path, name, date, isBackup=False, isPartial=False):
+        self.path = path
+        self.name = name
+        self.date = date
+        self.isBackup = isBackup
+        self.isPartial = isPartial
+
+    def __str__(self):
+        flags = ''
+        if self.isBackup:  flags += 'b'
+        if self.isPartial: flags += 'p'
+
+        dt = datetime.utcnow() - self.date
+
+        return '  {path:30} {flags:5} {dtime}'.format(
+                path=self.path,
+                flags=flags,
+                dtime=pretty_time_delta(dt.total_seconds())
+                )
 
 class TarsnapBackend(object):
     """The code that calls the tarsnap executable.
@@ -105,7 +143,7 @@ class TarsnapBackend(object):
     archives = property(get_archives)
 
     def get_backups(self, job):
-        """Return a dict of backups that exist for the given job, by
+        """Return a list of backups that exist for the given job, by
         parsing the list of archives.
         """
         # Assemble regular expressions that matche the job's target
@@ -113,12 +151,16 @@ class TarsnapBackend(object):
         unique = uuid.uuid4().hex
         regexes = []
         for possible_name in [job.name] + (job.aliases or []):
+            template = job.target
             target = Template(job.target).substitute(
-                {'name': possible_name, 'date': unique})
-            regexes.append(re.compile("^%s$" %
-                        re.escape(target).replace(unique, '(?P<date>.*?)')))
+                { 'name': possible_name, 'date': unique})
+            exp = "^{main}{ext}$".format(
+                    main=re.escape(target).replace(unique, '(?P<date>.*?)'),
+                    ext='(?P<ext>\.part)*'
+                    )
+            regexes.append(re.compile(exp))
 
-        backups = {}
+        backups = []
         for backup_path in self.get_archives():
             match = None
             for regex in regexes:
@@ -129,7 +171,10 @@ class TarsnapBackend(object):
                 # Not one of the regexes matched.
                 continue
             try:
-                date = parse_date(match.groupdict()['date'], job.dateformat)
+                grps = match.groupdict()
+                name = job.name
+                date = parse_date(grps['date'], job.dateformat)
+                isPartial = grps['ext'] == '.part'
             except ValueError, e:
                 # This can occasionally happen when multiple archives
                 # share a prefix, say for example you have "windows-$date"
@@ -143,7 +188,7 @@ class TarsnapBackend(object):
                 # the issue for most cases.
                 self.log.error("Ignoring '%s': %s" % (backup_path, e))
             else:
-                backups[backup_path] = date
+                backups.append(Archive(backup_path, name, date, isBackup=True, isPartial=isPartial))
 
         return backups
 
@@ -163,14 +208,14 @@ class TarsnapBackend(object):
         self.log.info('%d of those can be deleted' % (len(backups)-len(to_keep)))
 
         # Delete all others
-        for name, _ in backups.items():
-            if not name in to_keep:
-                self.log.info('Deleting %s' % name)
+        for bak in backups:
+            if not bak.path in to_keep:
+                self.log.info('Deleting %s' % bak.path)
                 if not self.dryrun:
-                    self.call('-d', '-f', name)
-                self.archives.remove(name)
+                    self.call('-d', '-f', bak.path)
+                self.archives.remove(bak.path)
             else:
-                self.log.debug('Keeping %s' % name)
+                self.log.debug('Keeping %s' % bak.path)
 
     def make(self, job):
         now = datetime.utcnow()
@@ -265,13 +310,9 @@ class ListCommand(Command):
         self.log.info('%s' % job.name)
 
         # Sort backups by time
-        # TODO: This duplicates code from the expire module. Should
-        # the list of backups always be returned sorted instead?
-        backups = [(name, time) for name, time in backups.items()]
-        backups.sort(cmp=lambda x, y: -cmp(x[1], y[1]))
-        for backup, _ in backups:
-            print "  %s" % backup
-
+        backups.sort(cmp=lambda x, y: -cmp(x.date, y.date))
+        for backup in backups:
+            print backup
 
 class ExpireCommand(Command):
 

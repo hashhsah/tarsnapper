@@ -14,7 +14,7 @@ def timedelta_div(td1, td2):
 
 
 def expire(backups, deltas):
-    """Given a dict of backup name => backup timestamp pairs in
+    """Given a list of Achive objects in
     ``backups``, and a list of ``timedelta`` objects in ``deltas`` defining
     the generations, will decide which of the backups can be deleted using
     a grandfather-father-son backup strategy.
@@ -48,8 +48,7 @@ def expire(backups, deltas):
         return []
 
     # First, sort the backups with most recent one first
-    backups = [(name, time) for name, time in backups.items()]
-    backups.sort(cmp=lambda x, y: -cmp(x[1], y[1]))
+    backups.sort(cmp=lambda x, y: -cmp(x.date, y.date))
     old_backups = backups[:]
 
     # Also make sure that we have the deltas in ascending order
@@ -57,8 +56,8 @@ def expire(backups, deltas):
     deltas.sort()
 
     # Always keep the most recent backup
-    most_recent_backup = backups[0][1]
-    to_keep = set([backups[0][0]])
+    most_recent_backup = backups[0].date
+    to_keep = set([backups[0].path])
 
     # Then, for each delta/generation, determine which backup to keep
     last_delta = deltas.pop()
@@ -75,7 +74,7 @@ def expire(backups, deltas):
             # in general. We do the latter. The difference is merely in how
             # long the oldest backup in each generation should be kept, that
             # is, how the given deltas should be interpreted.
-            by_dist = sorted([(bn, bd, abs(bd - dt_pointer)) for bn, bd in backups], key=operator.itemgetter(2))
+            by_dist = sorted([(bak.path, bak.date, abs(bak.date - dt_pointer)) for bak in backups], key=operator.itemgetter(2))
             if by_dist:
                 if by_dist[0][0] == last_selected:
                     # If the time diff between two backups is larger than
