@@ -240,6 +240,14 @@ class TarsnapBackend(object):
 
         return target, now
 
+    def getStats(self, job, i=0):
+        """Get statistics of the i-th archive with --print-stats. i=0 meaning the latest arhive.
+        """
+        backups = self.get_backups(job)
+        backups.sort(cmp=lambda x, y: -cmp(x.date, y.date))
+
+        return self.call('--print-stats', '-f', backups[i].path)
+
 
 DEFAULT_DATEFORMAT = '%Y%m%d-%H%M%S'
 
@@ -407,6 +415,11 @@ class MakeCommand(ExpireCommand):
 
         if job.exec_after:
             self.backend._exec_util(job.exec_after)
+
+        # print stats
+        if self.global_config.get('print-statistics', False):
+            res = self.backend.getStats(job)
+            self.log.info(res)
 
         # Expire old backups, but only bother if either we made a new
         # backup, or if expire was explicitly requested.
