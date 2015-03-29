@@ -230,6 +230,7 @@ class TarsnapBackend(object):
 
         if not self.dryrun:
             args = ['-c']
+            if job.chdir: args.extend(['-C', job.chdir])
             [args.extend(['--exclude', e]) for e in job.excludes]
             args.extend(['-f', target])
             args.extend(job.sources)
@@ -387,10 +388,15 @@ class MakeCommand(ExpireCommand):
         sources_missing = False
         if not job.force:
             for source in job.sources:
-                if not path.exists(source):
+                if job.chdir:
+                    src_path = path.join(job.chdir, source)
+                else:
+                    src_path = source
+
+                if not path.exists(src_path):
                     sources_missing = True
                     break
-                if path.isdir(source) and not os.listdir(source):
+                if path.isdir(src_path) and not os.listdir(src_path):
                     # directory is empty
                     sources_missing = True
                     break

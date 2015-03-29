@@ -38,6 +38,7 @@ class Job(object):
         self.name = initial.get('name')
         self.aliases = initial.get('aliases')
         self.target = initial.get('target')
+        self.chdir = initial.get('chdir')
         self.dateformat = initial.get('dateformat')
         self.deltas = initial.get('deltas')
         self.sources = initial.get('sources')
@@ -106,7 +107,7 @@ def load_config(text):
     default_deltas = parse_deltas(config.pop('deltas', None))
     default_target = require_placeholders(config.pop('target', None),
                                           ['name', 'date'], 'The global target')
-
+    default_chdir  = config.pop('chdir', None)
     read_jobs = {}
     jobs_section = config.pop('jobs', None)
     if not jobs_section:
@@ -143,6 +144,7 @@ def load_config(text):
             'aliases': aliases,
             'excludes': excludes,
             'target': job_dict.pop('target', default_target),
+            'chdir': job_dict.pop('chdir', default_chdir),
             'force': job_dict.pop('force', False),
             'deltas': parse_deltas(job_dict.pop('deltas', None)) or default_deltas,
             'dateformat': job_dict.pop('dateformat', default_dateformat),
